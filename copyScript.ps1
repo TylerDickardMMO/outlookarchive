@@ -1,16 +1,29 @@
-﻿function Split-File {
+﻿#Name: Tyler Dickard
+#Date: 7/27/2022
+#Description: This is a basic test script to copy files from one folder to another folder.
+#*************************************************************************************************
+#All of the Add-Types for this project
+#*************************************************************************************************
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+#*************************************************************************************************
+#Function Name: Split-File
+#Parameters: A String named Path and an int specifying the file size to divide by
+#Returns: a bunch of parts to a bigger file
+#Description: This function will split a file into several different parts for optimized compression
+#*************************************************************************************************
+function Split-File {
     param (
         [Parameter(Mandatory)]
         [String]
         $Path,
 
         [Int32]
-        $PartsSizeBytes = 10MB
+        $PartsSizeBytes = 50MB
     )
 
     try {
-        #Getting the path to construct the individual part
-        #filenames:
+        #Getting the path to get ready to split into individual parts
         $fullBaseName = [IO.Path]::GetFileName($Path)
         $baseName = [IO.Path]::GetFileNameWithoutExtension($Path)
         $parentFolder = [IO.Path]::GetDirectoryName($Path)
@@ -21,7 +34,7 @@
         $totChunks = [int]($origionalFile.Length / $PartsSizeBytes) + 1
         $digitCount = [int][Math]::Log10($totChunks) + 1
 
-        #read the origional file and split into chunks
+        #Read the origional file and split into chunks
         $reader = [IO.File]::OpenRead($Path)
         $count = 0
         $partCounter = 1
@@ -53,6 +66,12 @@
         throw "Unable to split file ${Path}: $_"
     }
 }
+#*************************************************************************************************
+#Function Name: Join-File
+#Parameters: A String named Path and a bool to decided if it deletes the part files or not
+#Returns: the file all joined back together
+#Description: This function will join a bunch of files to make the origional file
+#*************************************************************************************************
 function Join-File
 {
     
@@ -103,21 +122,8 @@ function Join-File
         throw "Unable to join part files: $_"
     }
 }
-#Name: Tyler Dickard
-#Date: 7/27/2022
-#Description: This is a basic test script to copy files from one folder to another folder.
-#*************************************************************************************************
-#All of the Add-Types for this project
-#*************************************************************************************************
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-#*************************************************************************************************
-#Checks for internet connection by pinging an IP address
-#*************************************************************************************************
 
-##if(-not (Test-NetConnection) -ccontains "PingSucceeded          : True") {
-  ##  throw
-##}
+
 #*************************************************************************************************
 #Generates the form
 #*************************************************************************************************
@@ -176,39 +182,59 @@ while(-not $result -eq [System.Windows.Forms.DialogResult]::OK) {
     Start-Sleep -Milliseconds 1
 } 
 #*************************************************************************************************
-#Checks if the result is OK, if so it will then check the text boxes to have some sort of input
-#if there isnt any input it will error out, but if it does have input it will attempt to do a transfer
-#from one device to another utilizing the secret share drive
+#Checks what radio button is checked, if upload it will call the split file function, and then upload
+#the compressed parts to one drive. If download it will download the compressed parts, decompress
+#them and then call the join file function to form the origional file.
 #*************************************************************************************************
 if ($result -eq [System.Windows.Forms.DialogResult]::OK)
 { 
     if( ($rbtnUpload.Checked -eq $true)) {
-        $sourcePart = "C:\Users\$env:UserName\Documents\Outlook Files\backup.pst"
-        Split-File -Path $sourcePart -Verbose
-        Remove-Item -Path "C:\Users\$env:UserName\Documents\Outlook Files\backup.pst"
+        $sourcePart = "C:\Users\$env:UserName\Documents\Outlook Files\"
+        Get-ChildItem -Path $sourcePart -Filter *.pst -Exclude "archive.pst" -Recurse | ForEach-Object {
+            Split-File -Path $_.FullName -Verbose
+            $origName += $_
+        }
+        
+        
+        Remove-Item -Path "C:\Users\$env:UserName\Documents\Outlook Files\*.pst" -Exclude "archive.pst"
         Get-ChildItem -Path "C:\Users\$env:UserName\Documents\Outlook Files\" -Filter *.part | ForEach-Object {
-            Compress-Archive -Path $_.FullName  -Destination "C:\Users\$env:UserName\AppData\Local\Microsoft\Outlook\$_.zip" -CompressionLevel Optimal 
+            Compress-Archive -Path $_.FullName  -Destination "C:\Users\$env:UserName\AppData\Local\Microsoft\Outlook\$_.zip" -CompressionLevel Optimal
+            Write-Host "Compressing: $_"
             Remove-Item $_.FullName
         }
+        Write-Host "Compressing all of the part.zip files into one file; outlookArchive.zip"
         Compress-Archive -Path "C:\Users\$env:UserName\AppData\Local\Microsoft\Outlook\*.zip" -Destination "C:\Users\$env:UserName\AppData\Local\Microsoft\Outlook\outlookArchive.zip"  -CompressionLevel Optimal
+        Write-Host "Copying the outlookArchive.zip file to C:\Users\$env:UserName\OneDrive - MMO"
         Copy-Item -Path "C:\Users\$env:UserName\AppData\Local\Microsoft\Outlook\outlookArchive.zip" -Destination "C:\Users\$env:UserName\OneDrive - MMO"
         Remove-Item -Path "C:\Users\$env:UserName\AppData\Local\Microsoft\Outlook\." -Include *.zip  -Force -Recurse
+        
         $form.Close();
     } elseif ($rbtnDownload.Checked -eq $true) {
         while(-not ((Test-Path -Path "C:\Users\$env:UserName\OneDrive - MMO\outlookArchive.zip" -PathType Leaf) -eq $true)) {
             Start-Sleep -Milliseconds 1
         }
+        $origName = @()
+        Write-Host "Copying outlookArchive.zip from C:\Users\$env:UserName\OneDrive - MMO"
         Copy-Item -Path "C:\Users\$env:UserName\OneDrive - MMO\outlookArchive.zip" -Destination "C:\Users\$env:UserName\Documents\Outlook Files\"
         Remove-Item -Path "C:\Users\$env:UserName\OneDrive - MMO\outlookArchive.zip"
+        Write-Host "Decompressing outlookArchive.zip"
         Expand-Archive -Path "C:\Users\$env:UserName\Documents\Outlook Files\outlookArchive.zip" -Destination "C:\Users\$env:UserName\AppData\Local\Microsoft\Outlook\"
         Remove-Item -Path "C:\Users\$env:UserName\Documents\Outlook Files\outlookArchive.zip"
         Get-ChildItem -Path "C:\Users\$env:UserName\AppData\Local\Microsoft\Outlook\" -Filter *.zip | ForEach-Object {
             Expand-Archive -Path $_.FullName  -Destination "C:\Users\$env:UserName\AppData\Local\Microsoft\Outlook\"
+            Write-Host "Expanding $_"
             Remove-Item $_.FullName
         }
-        Join-File "C:\Users\$env:UserName\AppData\Local\Microsoft\Outlook\backup.pst" -DeletePartFiles -Verbose
-        Remove-Item -Path "C:\Users\$env:UserName\AppData\Local\Microsoft\Outlook\*.zip" -Force
-
+        Get-ChildItem -Path "C:\Users\$env:UserName\AppData\Local\Microsoft\Outlook\" -Filter *.part | ForEach-Object {
+            $baseName = [IO.Path]::GetFileNameWithoutExtension($_.FullName)
+            $basebaseName = [IO.Path]::GetFileNameWithoutExtension($baseName)
+            if (-not $origName.Contains($basebaseName)) {
+                $origName += $basebaseName
+            }
+        }
+        $origName | ForEach-Object {
+            Join-File "C:\Users\$env:UserName\AppData\Local\Microsoft\Outlook\$_" -DeletePartFiles -Verbose
+        }
     } else {
         Write-Warning "ERROR: radio button is not checked. I'm not sure how you managed to do this, but please report it to IT :)"
         $form.Close();
